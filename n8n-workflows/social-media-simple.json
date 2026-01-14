@@ -1,0 +1,232 @@
+{
+  "name": "Social Media Content Pipeline - Simple",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Content Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $input.item.json;\n\nconst required = ['brand_id', 'content_type', 'platform', 'topic'];\nconst missing = required.filter(f => !input[f]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}`);\n}\n\nreturn {\n  json: {\n    ...input,\n    request_id: `REQ-${Date.now()}`,\n    created_at: new Date().toISOString(),\n    status: 'pending',\n    workflow_stage: 'ideation',\n    priority: input.priority || 'normal',\n    due_date: input.due_date || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()\n  }\n};"
+      },
+      "id": "validate-request",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM brands WHERE id = '{{ $json.brand_id }}'",
+        "options": {}
+      },
+      "id": "fetch-brand",
+      "name": "Fetch Brand Profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const request = $('Validate Request').item.json;\nconst brand = $input.item.json;\n\nreturn {\n  json: {\n    ...request,\n    brand: {\n      name: brand.name,\n      voice: brand.voice_guidelines,\n      tone: brand.tone,\n      colors: brand.brand_colors,\n      hashtags: brand.default_hashtags,\n      audience: brand.target_audience\n    }\n  }\n};"
+      },
+      "id": "merge-brand-data",
+      "name": "Merge Brand Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a social media content strategist.\n\nBrand: {{ $json.brand.name }}\nVoice: {{ $json.brand.voice }}\nTone: {{ $json.brand.tone }}\nAudience: {{ $json.brand.audience }}\n\nCreate content for:\n- Platform: {{ $json.platform }}\n- Type: {{ $json.content_type }}\n- Topic: {{ $json.topic }}\n- Notes: {{ $json.notes || 'None' }}\n\nGenerate a complete content package with:\n1. Hook (attention-grabbing opener)\n2. Main content (caption, script, or post text appropriate for the platform)\n3. Call-to-action\n4. Hashtags (appropriate for platform)\n5. Visual direction (what images/video should show)\n\nFormat as JSON with keys: hook, content, cta, hashtags, visual_direction"
+      },
+      "id": "ai-content-creator",
+      "name": "AI Content Creator",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "openai-model",
+      "name": "OpenAI GPT-4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [1120, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const request = $('Merge Brand Data').item.json;\nconst aiOutput = $input.item.json.text || $input.item.json.response || $input.item.json;\n\nlet content;\ntry {\n  // Try to parse JSON from the AI response\n  const jsonMatch = typeof aiOutput === 'string' ? aiOutput.match(/\\{[\\s\\S]*\\}/) : null;\n  content = jsonMatch ? JSON.parse(jsonMatch[0]) : aiOutput;\n} catch (e) {\n  content = { raw_response: aiOutput };\n}\n\nreturn {\n  json: {\n    request_id: request.request_id,\n    brand_id: request.brand_id,\n    brand_name: request.brand.name,\n    platform: request.platform,\n    content_type: request.content_type,\n    topic: request.topic,\n    content: content,\n    brand_voice: request.brand.voice,\n    brand_tone: request.brand.tone,\n    hashtags: request.brand.hashtags,\n    status: 'draft_complete',\n    created_at: request.created_at,\n    updated_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "format-output",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_drafts (request_id, brand_id, platform, content_type, topic, content_idea, status, created_at, updated_at) VALUES ('{{ $json.request_id }}', '{{ $json.brand_id }}', '{{ $json.platform }}', '{{ $json.content_type }}', '{{ $json.topic }}', '{{ JSON.stringify($json.content) }}'::jsonb, '{{ $json.status }}', '{{ $json.created_at }}', '{{ $json.updated_at }}') RETURNING *",
+        "options": {}
+      },
+      "id": "save-draft",
+      "name": "Save to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"request_id\": \"{{ $('Format Output').item.json.request_id }}\",\n  \"brand\": \"{{ $('Format Output').item.json.brand_name }}\",\n  \"platform\": \"{{ $('Format Output').item.json.platform }}\",\n  \"content\": {{ JSON.stringify($('Format Output').item.json.content) }},\n  \"status\": \"draft_complete\",\n  \"message\": \"Content created successfully\"\n}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "OpenAI GPT-4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Content Creator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Request Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Fetch Brand Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Brand Profile": {
+      "main": [
+        [
+          {
+            "node": "Merge Brand Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Brand Data": {
+      "main": [
+        [
+          {
+            "node": "AI Content Creator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Content Creator": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Save to Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Database": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "social-media"
+    },
+    {
+      "name": "simple"
+    }
+  ]
+}

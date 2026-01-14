@@ -1,0 +1,632 @@
+{
+  "name": "Social Media Content Pipeline - Multi-Brand",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Content Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Validate and enrich incoming content request\nconst input = $input.item.json;\n\n// Required fields validation\nconst required = ['brand_id', 'content_type', 'platform', 'topic'];\nconst missing = required.filter(f => !input[f]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}`);\n}\n\n// Enrich with defaults and metadata\nreturn {\n  json: {\n    ...input,\n    request_id: `REQ-${Date.now()}`,\n    created_at: new Date().toISOString(),\n    status: 'pending',\n    workflow_stage: 'ideation',\n    priority: input.priority || 'normal',\n    due_date: input.due_date || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()\n  }\n};"
+      },
+      "id": "validate-request",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM brands WHERE id = $1",
+        "options": {
+          "queryParams": "={{ [$json.brand_id] }}"
+        }
+      },
+      "id": "fetch-brand",
+      "name": "Fetch Brand Profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Merge brand data with request\nconst request = $('Validate Request').item.json;\nconst brand = $input.item.json;\n\nreturn {\n  json: {\n    ...request,\n    brand: {\n      name: brand.name,\n      voice: brand.voice_guidelines,\n      tone: brand.tone,\n      colors: brand.brand_colors,\n      hashtags: brand.default_hashtags,\n      audience: brand.target_audience\n    }\n  }\n};"
+      },
+      "id": "merge-brand-data",
+      "name": "Merge Brand Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Brand: {{ $json.brand.name }}\nVoice: {{ $json.brand.voice }}\nTone: {{ $json.brand.tone }}\nAudience: {{ $json.brand.audience }}\n\nContent Request:\n- Platform: {{ $json.platform }}\n- Type: {{ $json.content_type }}\n- Topic: {{ $json.topic }}\n- Additional Notes: {{ $json.notes || 'None' }}\n\nGenerate a content concept with hook, main points, CTA, and visual direction. Output JSON with: hook, main_points (array), cta, hashtags (array), visual_direction."
+      },
+      "id": "ai-ideation",
+      "name": "AI Content Ideation",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "ideation-model",
+      "name": "Ideation Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [1120, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse AI response and structure content idea\nconst request = $('Merge Brand Data').item.json;\nconst aiResponse = JSON.parse($input.item.json.message.content);\n\nreturn {\n  json: {\n    ...request,\n    content_idea: aiResponse,\n    workflow_stage: 'draft_creation',\n    updated_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "structure-idea",
+      "name": "Structure Content Idea",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "instagram",
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "instagram",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "linkedin",
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "linkedin",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "tiktok",
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "tiktok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "twitter",
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "twitter",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "platform-router",
+      "name": "Platform Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an Instagram content specialist. Write platform-optimized captions.\n\nRules:\n- Hook in first line (before 'more')\n- Use line breaks for readability\n- Include emojis strategically\n- End with clear CTA\n- Format hashtags at end\n\nBrand Voice: {{ $json.brand.voice }}\nTone: {{ $json.brand.tone }}\n\nContent Idea:\nHook: {{ $json.content_idea.hook }}\nMain Points: {{ $json.content_idea.main_points.join(', ') }}\nCTA: {{ $json.content_idea.cta }}\nVisual: {{ $json.content_idea.visual_direction }}\n\nContent Type: {{ $json.content_type }}\n\nOutput JSON with: caption, hashtags (array), alt_text, story_text"
+      },
+      "id": "instagram-writer",
+      "name": "Instagram Caption Writer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1800, 100]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.6
+        }
+      },
+      "id": "instagram-model",
+      "name": "Instagram Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [1800, -100],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a LinkedIn content specialist. Write professional, thought-leadership style posts.\n\nRules:\n- Bold opening statement or question\n- Use line breaks and → bullets\n- Professional but personable tone\n- End with discussion prompt\n- 3-5 hashtags at end\n\nBrand Voice: {{ $json.brand.voice }}\nTone: {{ $json.brand.tone }}\n\nContent Idea:\nHook: {{ $json.content_idea.hook }}\nMain Points: {{ $json.content_idea.main_points.join(', ') }}\nCTA: {{ $json.content_idea.cta }}\n\nContent Type: {{ $json.content_type }}\n\nOutput JSON with: post_text, hashtags (array), article_summary"
+      },
+      "id": "linkedin-writer",
+      "name": "LinkedIn Post Writer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1800, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.6
+        }
+      },
+      "id": "linkedin-model",
+      "name": "LinkedIn Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [2000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a TikTok content specialist. Write viral-style scripts and captions.\n\nRules:\n- Punchy, conversational tone\n- Hook in first 3 seconds\n- Keep caption short and casual\n- Include trending hashtag suggestions\n- Suggest audio/sound if relevant\n\nBrand Voice: {{ $json.brand.voice }}\nTone: {{ $json.brand.tone }}\n\nContent Idea:\nHook: {{ $json.content_idea.hook }}\nMain Points: {{ $json.content_idea.main_points.join(', ') }}\nCTA: {{ $json.content_idea.cta }}\nVisual: {{ $json.content_idea.visual_direction }}\n\nContent Type: {{ $json.content_type }}\n\nOutput JSON with: script (with timestamps), caption, hashtags (array), suggested_audio, hook_text"
+      },
+      "id": "tiktok-writer",
+      "name": "TikTok Script Writer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1800, 500]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "tiktok-model",
+      "name": "TikTok Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [2000, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a Twitter/X content specialist. Write concise, punchy tweets.\n\nRules:\n- Under 280 characters for single tweets\n- Thread format for longer content\n- Conversational and direct\n- 1-2 hashtags max\n- Strong hook\n\nBrand Voice: {{ $json.brand.voice }}\nTone: {{ $json.brand.tone }}\n\nContent Idea:\nHook: {{ $json.content_idea.hook }}\nMain Points: {{ $json.content_idea.main_points.join(', ') }}\nCTA: {{ $json.content_idea.cta }}\n\nContent Type: {{ $json.content_type }}\n\nOutput JSON with: tweet (or tweets array for thread), hashtags (array)"
+      },
+      "id": "twitter-writer",
+      "name": "Twitter Post Writer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1800, 700]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "twitter-model",
+      "name": "Twitter Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [2000, 700],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-content",
+      "name": "Merge All Content",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2060, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Compile final content package\nconst baseData = $('Structure Content Idea').item.json;\nconst platformContent = JSON.parse($input.item.json.message.content);\n\nconst contentPackage = {\n  request_id: baseData.request_id,\n  brand_id: baseData.brand_id,\n  brand_name: baseData.brand.name,\n  platform: baseData.platform,\n  content_type: baseData.content_type,\n  topic: baseData.topic,\n  \n  // Content\n  content_idea: baseData.content_idea,\n  platform_content: platformContent,\n  \n  // Metadata\n  status: 'pending_review',\n  workflow_stage: 'internal_review',\n  created_at: baseData.created_at,\n  updated_at: new Date().toISOString(),\n  due_date: baseData.due_date,\n  \n  // Approval tracking\n  approval: {\n    internal: { status: 'pending', reviewer: null, date: null },\n    client: { status: 'pending', reviewer: null, date: null }\n  }\n};\n\nreturn { json: contentPackage };"
+      },
+      "id": "compile-package",
+      "name": "Compile Content Package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2280, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "content_drafts",
+        "columns": "request_id, brand_id, platform, content_type, topic, content_data, status, created_at, updated_at, due_date",
+        "returnFields": "*",
+        "options": {}
+      },
+      "id": "save-draft",
+      "name": "Save to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#content-reviews",
+        "text": "=📝 *New Content Ready for Review*\n\n*Brand:* {{ $json.brand_name }}\n*Platform:* {{ $json.platform }}\n*Type:* {{ $json.content_type }}\n*Topic:* {{ $json.topic }}\n\n*Request ID:* `{{ $json.request_id }}`\n*Due Date:* {{ $json.due_date }}\n\n<{{ $env.APP_URL }}/review/{{ $json.request_id }}|Review Content →>",
+        "otherOptions": {}
+      },
+      "id": "notify-slack",
+      "name": "Notify Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2720, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.brand.approval_email }}",
+        "subject": "=Content Ready for Review: {{ $json.topic }} [{{ $json.request_id }}]",
+        "emailType": "html",
+        "message": "=<h2>New Content Ready for Review</h2>\n<p><strong>Brand:</strong> {{ $json.brand_name }}</p>\n<p><strong>Platform:</strong> {{ $json.platform }}</p>\n<p><strong>Type:</strong> {{ $json.content_type }}</p>\n<p><strong>Topic:</strong> {{ $json.topic }}</p>\n<p><strong>Due Date:</strong> {{ $json.due_date }}</p>\n<hr>\n<p><a href=\"{{ $env.APP_URL }}/review/{{ $json.request_id }}\">Click here to review and approve</a></p>",
+        "options": {}
+      },
+      "id": "notify-email",
+      "name": "Notify Reviewer (Email)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2720, 400],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"request_id\": \"{{ $json.request_id }}\",\n  \"status\": \"{{ $json.status }}\",\n  \"message\": \"Content created and sent for review\",\n  \"review_url\": \"{{ $env.APP_URL }}/review/{{ $json.request_id }}\"\n}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2940, 300]
+    }
+  ],
+  "connections": {
+    "Ideation Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Content Ideation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Instagram Caption Writer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LinkedIn Post Writer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "TikTok Script Writer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twitter Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Twitter Post Writer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Request Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Fetch Brand Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Brand Profile": {
+      "main": [
+        [
+          {
+            "node": "Merge Brand Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Brand Data": {
+      "main": [
+        [
+          {
+            "node": "AI Content Ideation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Content Ideation": {
+      "main": [
+        [
+          {
+            "node": "Structure Content Idea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structure Content Idea": {
+      "main": [
+        [
+          {
+            "node": "Platform Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Router": {
+      "main": [
+        [
+          {
+            "node": "Instagram Caption Writer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LinkedIn Post Writer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TikTok Script Writer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Twitter Post Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Caption Writer": {
+      "main": [
+        [
+          {
+            "node": "Merge All Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Post Writer": {
+      "main": [
+        [
+          {
+            "node": "Merge All Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok Script Writer": {
+      "main": [
+        [
+          {
+            "node": "Merge All Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twitter Post Writer": {
+      "main": [
+        [
+          {
+            "node": "Merge All Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Content": {
+      "main": [
+        [
+          {
+            "node": "Compile Content Package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Content Package": {
+      "main": [
+        [
+          {
+            "node": "Save to Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Database": {
+      "main": [
+        [
+          {
+            "node": "Notify Team (Slack)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Reviewer (Email)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "social-media"
+    },
+    {
+      "name": "content-creation"
+    },
+    {
+      "name": "ai-powered"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}
