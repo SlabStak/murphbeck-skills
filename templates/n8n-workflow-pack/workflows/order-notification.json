@@ -1,0 +1,153 @@
+{
+  "name": "Order Notification System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate order data\nconst order = $input.item.json.body;\n\n// Calculate totals if not provided\nlet subtotal = order.subtotal || 0;\nlet total = order.total || 0;\n\nif (order.items && !subtotal) {\n  subtotal = order.items.reduce((sum, item) => {\n    return sum + (item.price * item.quantity);\n  }, 0);\n}\n\nif (!total) {\n  const shipping = order.shipping_cost || 0;\n  const tax = order.tax || (subtotal * 0.08); // Default 8% tax\n  total = subtotal + shipping + tax;\n}\n\n// Format currency\nconst formatCurrency = (amount) => {\n  return new Intl.NumberFormat('en-US', {\n    style: 'currency',\n    currency: order.currency || 'USD'\n  }).format(amount);\n};\n\n// Build line items HTML\nconst itemsHtml = order.items?.map(item => `\n  <tr>\n    <td style=\"padding: 10px; border-bottom: 1px solid #eee;\">${item.name}</td>\n    <td style=\"padding: 10px; border-bottom: 1px solid #eee; text-align: center;\">${item.quantity}</td>\n    <td style=\"padding: 10px; border-bottom: 1px solid #eee; text-align: right;\">${formatCurrency(item.price)}</td>\n    <td style=\"padding: 10px; border-bottom: 1px solid #eee; text-align: right;\">${formatCurrency(item.price * item.quantity)}</td>\n  </tr>\n`).join('') || '';\n\nreturn {\n  order_id: order.order_id || order.id,\n  customer: {\n    email: order.customer_email || order.email,\n    name: order.customer_name || order.name || 'Valued Customer',\n    phone: order.customer_phone || order.phone\n  },\n  shipping_address: order.shipping_address || {},\n  items: order.items || [],\n  items_html: itemsHtml,\n  subtotal: formatCurrency(subtotal),\n  shipping: formatCurrency(order.shipping_cost || 0),\n  tax: formatCurrency(order.tax || subtotal * 0.08),\n  total: formatCurrency(total),\n  total_raw: total,\n  status: order.status || 'confirmed',\n  created_at: order.created_at || new Date().toISOString()\n};"
+      },
+      "id": "process-order",
+      "name": "Process Order Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "orders@yourstore.com",
+        "toEmail": "={{ $json.customer.email }}",
+        "subject": "=Order Confirmed - #{{ $json.order_id }}",
+        "html": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #4f46e5; color: white; padding: 20px; text-align: center; }\n    .content { padding: 20px; background: #f9fafb; }\n    .order-table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n    .order-table th { background: #e5e7eb; padding: 10px; text-align: left; }\n    .totals { text-align: right; margin-top: 20px; }\n    .total-row { padding: 5px 0; }\n    .grand-total { font-size: 1.2em; font-weight: bold; color: #4f46e5; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 0.9em; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>Order Confirmed!</h1>\n      <p>Order #{{ $json.order_id }}</p>\n    </div>\n    <div class=\"content\">\n      <p>Hi {{ $json.customer.name }},</p>\n      <p>Thank you for your order! We're processing it now and will notify you when it ships.</p>\n      \n      <table class=\"order-table\">\n        <thead>\n          <tr>\n            <th>Item</th>\n            <th style=\"text-align: center;\">Qty</th>\n            <th style=\"text-align: right;\">Price</th>\n            <th style=\"text-align: right;\">Total</th>\n          </tr>\n        </thead>\n        <tbody>\n          {{ $json.items_html }}\n        </tbody>\n      </table>\n      \n      <div class=\"totals\">\n        <div class=\"total-row\">Subtotal: {{ $json.subtotal }}</div>\n        <div class=\"total-row\">Shipping: {{ $json.shipping }}</div>\n        <div class=\"total-row\">Tax: {{ $json.tax }}</div>\n        <div class=\"total-row grand-total\">Total: {{ $json.total }}</div>\n      </div>\n    </div>\n    <div class=\"footer\">\n      <p>Questions? Reply to this email or contact support@yourstore.com</p>\n    </div>\n  </div>\n</body>\n</html>"
+      },
+      "id": "send-customer-email",
+      "name": "Send Customer Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [700, 200],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#orders",
+        "text": "=:package: *New Order #{{ $json.order_id }}*\n\n*Customer:* {{ $json.customer.name }} ({{ $json.customer.email }})\n*Total:* {{ $json.total }}\n*Items:* {{ $json.items.length }} item(s)\n\n{{ $json.items.map(i => `• ${i.quantity}x ${i.name}`).join('\\n') }}",
+        "otherOptions": {}
+      },
+      "id": "notify-slack",
+      "name": "Notify Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [700, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "2",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.total_raw }}",
+              "operation": "larger",
+              "value2": 500
+            }
+          ]
+        }
+      },
+      "id": "check-high-value",
+      "name": "High Value Order?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [950, 400]
+    },
+    {
+      "parameters": {
+        "fromEmail": "alerts@yourstore.com",
+        "toEmail": "sales@yourstore.com",
+        "subject": "=🎉 High Value Order - #{{ $('Process Order Data').item.json.order_id }} - {{ $('Process Order Data').item.json.total }}",
+        "html": "=<h2>High Value Order Alert!</h2>\n<p><strong>Order:</strong> #{{ $('Process Order Data').item.json.order_id }}</p>\n<p><strong>Customer:</strong> {{ $('Process Order Data').item.json.customer.name }}</p>\n<p><strong>Email:</strong> {{ $('Process Order Data').item.json.customer.email }}</p>\n<p><strong>Total:</strong> {{ $('Process Order Data').item.json.total }}</p>\n<p>Consider reaching out personally to thank this customer!</p>"
+      },
+      "id": "alert-sales",
+      "name": "Alert Sales Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"order_id\": \"{{ $('Process Order Data').item.json.order_id }}\", \"message\": \"Order notification sent\" }"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "Order Webhook": {
+      "main": [
+        [{ "node": "Process Order Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Order Data": {
+      "main": [
+        [
+          { "node": "Send Customer Email", "type": "main", "index": 0 },
+          { "node": "Notify Team", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Send Customer Email": {
+      "main": [
+        [{ "node": "Respond", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Team": {
+      "main": [
+        [{ "node": "High Value Order?", "type": "main", "index": 0 }]
+      ]
+    },
+    "High Value Order?": {
+      "main": [
+        [{ "node": "Alert Sales Team", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Alert Sales Team": {
+      "main": [
+        [{ "node": "Respond", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["e-commerce", "notifications", "email", "orders"]
+}

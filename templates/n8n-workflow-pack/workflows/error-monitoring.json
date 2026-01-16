@@ -1,0 +1,224 @@
+{
+  "name": "Error Monitoring & Alerting",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "error-webhook",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Error Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse error data from various sources (Sentry, custom, etc.)\nconst data = $input.item.json.body || $input.item.json;\n\n// Normalize error format\nconst error = {\n  id: data.error_id || data.event_id || crypto.randomUUID(),\n  message: data.message || data.error?.message || data.exception?.values?.[0]?.value || 'Unknown error',\n  type: data.type || data.error?.type || data.exception?.values?.[0]?.type || 'Error',\n  stack: data.stack || data.error?.stack || data.exception?.values?.[0]?.stacktrace?.frames?.map(f => `  at ${f.function} (${f.filename}:${f.lineno})`).join('\\n') || '',\n  level: data.level || 'error',\n  environment: data.environment || data.env || 'production',\n  service: data.service || data.project || data.tags?.service || 'unknown',\n  url: data.url || data.request?.url || '',\n  user: data.user || data.user_id || 'anonymous',\n  timestamp: data.timestamp || new Date().toISOString(),\n  extra: data.extra || data.contexts || {}\n};\n\n// Determine severity\nlet severity = 'low';\nconst criticalPatterns = /database|connection|timeout|out of memory|fatal|critical/i;\nconst highPatterns = /null|undefined|authentication|authorization|payment/i;\n\nif (criticalPatterns.test(error.message) || error.level === 'fatal') {\n  severity = 'critical';\n} else if (highPatterns.test(error.message) || error.level === 'error') {\n  severity = 'high';\n} else if (error.level === 'warning') {\n  severity = 'medium';\n}\n\nreturn {\n  ...error,\n  severity,\n  severity_emoji: severity === 'critical' ? '🔴' : severity === 'high' ? '🟠' : severity === 'medium' ? '🟡' : '🟢'\n};"
+      },
+      "id": "parse-error",
+      "name": "Parse Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "value": "critical",
+              "output": 0
+            },
+            {
+              "value": "high",
+              "output": 1
+            },
+            {
+              "value": "medium",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "route-severity",
+      "name": "Route by Severity",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#critical-alerts",
+        "text": "=:rotating_light: *CRITICAL ERROR* :rotating_light:\n\n*Service:* {{ $json.service }}\n*Environment:* {{ $json.environment }}\n*Error:* {{ $json.type }}\n\n```\n{{ $json.message }}\n```\n\n*Stack Trace:*\n```\n{{ $json.stack.substring(0, 500) }}\n```\n\n*URL:* {{ $json.url || 'N/A' }}\n*User:* {{ $json.user }}\n*Time:* {{ $json.timestamp }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "alert-critical",
+      "name": "Critical Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [900, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "1",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#errors",
+        "text": "=🟠 *High Priority Error*\n\n*Service:* {{ $json.service }} | *Env:* {{ $json.environment }}\n*Error:* {{ $json.type }}: {{ $json.message }}\n*URL:* {{ $json.url || 'N/A' }}",
+        "otherOptions": {}
+      },
+      "id": "alert-high",
+      "name": "High Priority Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [900, 250],
+      "credentials": {
+        "slackApi": {
+          "id": "1",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#errors",
+        "text": "=🟡 *Warning*: {{ $json.service }} - {{ $json.message.substring(0, 200) }}",
+        "otherOptions": {}
+      },
+      "id": "alert-medium",
+      "name": "Medium Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [900, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "1",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PAGERDUTY_EVENTS_URL || 'https://events.pagerduty.com/v2/enqueue' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"routing_key\": \"{{ $env.PAGERDUTY_ROUTING_KEY }}\",\n  \"event_action\": \"trigger\",\n  \"dedup_key\": \"{{ $json.id }}\",\n  \"payload\": {\n    \"summary\": \"[{{ $json.environment }}] {{ $json.service }}: {{ $json.message.substring(0, 200) }}\",\n    \"severity\": \"critical\",\n    \"source\": \"{{ $json.service }}\",\n    \"timestamp\": \"{{ $json.timestamp }}\",\n    \"custom_details\": {\n      \"error_type\": \"{{ $json.type }}\",\n      \"url\": \"{{ $json.url }}\",\n      \"user\": \"{{ $json.user }}\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "id": "pagerduty",
+      "name": "Page On-Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1150, 100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $('Parse Error').item.json.timestamp }}",
+            "Severity": "={{ $('Parse Error').item.json.severity }}",
+            "Service": "={{ $('Parse Error').item.json.service }}",
+            "Environment": "={{ $('Parse Error').item.json.environment }}",
+            "Type": "={{ $('Parse Error').item.json.type }}",
+            "Message": "={{ $('Parse Error').item.json.message }}",
+            "URL": "={{ $('Parse Error').item.json.url }}",
+            "User": "={{ $('Parse Error').item.json.user }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-to-sheets",
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1150, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return summary of actions taken\nconst error = $('Parse Error').item.json;\n\nreturn {\n  status: 'processed',\n  error_id: error.id,\n  severity: error.severity,\n  actions: [\n    'Logged to Google Sheets',\n    error.severity === 'critical' ? 'PagerDuty alert sent' : null,\n    'Slack notification sent'\n  ].filter(Boolean)\n};"
+      },
+      "id": "summarize",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 300]
+    }
+  ],
+  "connections": {
+    "Error Webhook": {
+      "main": [
+        [{ "node": "Parse Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Error": {
+      "main": [
+        [{ "node": "Route by Severity", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Severity": {
+      "main": [
+        [{ "node": "Critical Alert", "type": "main", "index": 0 }],
+        [{ "node": "High Priority Alert", "type": "main", "index": 0 }],
+        [{ "node": "Medium Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Critical Alert": {
+      "main": [
+        [{ "node": "Page On-Call", "type": "main", "index": 0 }]
+      ]
+    },
+    "Page On-Call": {
+      "main": [
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "High Priority Alert": {
+      "main": [
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Medium Alert": {
+      "main": [
+        [{ "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log to Sheets": {
+      "main": [
+        [{ "node": "Summarize", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["monitoring", "errors", "alerting", "pagerduty", "slack"]
+}

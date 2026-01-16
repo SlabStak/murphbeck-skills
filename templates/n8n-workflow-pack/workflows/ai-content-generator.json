@@ -1,0 +1,218 @@
+{
+  "name": "AI Content Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-content",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "value": "blog",
+              "output": 0
+            },
+            {
+              "value": "social",
+              "output": 1
+            },
+            {
+              "value": "email",
+              "output": 2
+            },
+            {
+              "value": "ad",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "id": "route-type",
+      "name": "Route by Content Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional blog writer. Write a comprehensive blog post based on the following:\n\nTopic: {{ $('Webhook').item.json.body.topic }}\nTarget audience: {{ $('Webhook').item.json.body.audience || 'general' }}\nTone: {{ $('Webhook').item.json.body.tone || 'professional' }}\nWord count: {{ $('Webhook').item.json.body.word_count || '800' }}\n\nInclude:\n- An engaging title\n- An introduction hook\n- 3-5 main sections with headers\n- A conclusion with call-to-action\n- SEO-friendly structure\n\nFormat the output as JSON with fields: title, introduction, sections (array of {header, content}), conclusion, meta_description"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 4000
+        }
+      },
+      "id": "generate-blog",
+      "name": "Generate Blog Post",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [700, 100],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a social media expert. Create engaging social media content based on:\n\nTopic: {{ $('Webhook').item.json.body.topic }}\nPlatforms: {{ $('Webhook').item.json.body.platforms || 'Twitter, LinkedIn' }}\nTone: {{ $('Webhook').item.json.body.tone || 'engaging' }}\n\nCreate content for each platform, optimized for that platform's best practices.\n\nFormat as JSON with fields for each platform (twitter, linkedin, instagram, etc.), each containing: text, hashtags (array), call_to_action"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "generate-social",
+      "name": "Generate Social Posts",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [700, 250],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an email marketing specialist. Create an email based on:\n\nPurpose: {{ $('Webhook').item.json.body.purpose || 'newsletter' }}\nTopic: {{ $('Webhook').item.json.body.topic }}\nAudience: {{ $('Webhook').item.json.body.audience || 'subscribers' }}\nTone: {{ $('Webhook').item.json.body.tone || 'friendly professional' }}\n\nFormat as JSON with fields: subject_line, preview_text, greeting, body_html (with proper HTML formatting), call_to_action, signature"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "generate-email",
+      "name": "Generate Email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [700, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an advertising copywriter. Create ad copy for:\n\nProduct/Service: {{ $('Webhook').item.json.body.topic }}\nPlatform: {{ $('Webhook').item.json.body.platform || 'Facebook' }}\nGoal: {{ $('Webhook').item.json.body.goal || 'conversions' }}\nTarget audience: {{ $('Webhook').item.json.body.audience }}\n\nCreate multiple variations for A/B testing.\n\nFormat as JSON with fields: variations (array of {headline, primary_text, description, call_to_action})"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "generate-ad",
+      "name": "Generate Ad Copy",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [700, 550],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the AI response and format for output\nconst input = $input.item.json;\nlet content;\n\ntry {\n  // Try to parse as JSON from the message content\n  const messageContent = input.message?.content || input;\n  content = typeof messageContent === 'string' \n    ? JSON.parse(messageContent) \n    : messageContent;\n} catch (e) {\n  // If parsing fails, return raw content\n  content = { raw: input.message?.content || input };\n}\n\nreturn {\n  success: true,\n  content_type: $('Webhook').item.json.body.type || 'blog',\n  generated_at: new Date().toISOString(),\n  content\n};"
+      },
+      "id": "format-output",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1150, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Route by Content Type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Content Type": {
+      "main": [
+        [{ "node": "Generate Blog Post", "type": "main", "index": 0 }],
+        [{ "node": "Generate Social Posts", "type": "main", "index": 0 }],
+        [{ "node": "Generate Email", "type": "main", "index": 0 }],
+        [{ "node": "Generate Ad Copy", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Blog Post": {
+      "main": [
+        [{ "node": "Format Output", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Social Posts": {
+      "main": [
+        [{ "node": "Format Output", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Email": {
+      "main": [
+        [{ "node": "Format Output", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Ad Copy": {
+      "main": [
+        [{ "node": "Format Output", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [{ "node": "Respond", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["ai", "content", "openai", "marketing"]
+}

@@ -1,0 +1,223 @@
+{
+  "name": "Webhook Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-router",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract routing info from headers or body\nconst headers = $input.item.json.headers;\nconst body = $input.item.json.body;\n\n// Determine route based on source header or body type\nlet route = 'default';\n\nif (headers['x-webhook-source']) {\n  route = headers['x-webhook-source'].toLowerCase();\n} else if (body.type) {\n  route = body.type.toLowerCase();\n} else if (body.event) {\n  route = body.event.toLowerCase();\n}\n\nreturn {\n  route,\n  payload: body,\n  headers,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "parse-webhook",
+      "name": "Parse Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "value": "stripe",
+              "output": 0
+            },
+            {
+              "value": "shopify",
+              "output": 1
+            },
+            {
+              "value": "github",
+              "output": 2
+            },
+            {
+              "value": "slack",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 4
+      },
+      "id": "route",
+      "name": "Route by Source",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STRIPE_WEBHOOK_HANDLER }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "payload",
+              "value": "={{ JSON.stringify($json.payload) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "stripe-handler",
+      "name": "Stripe Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 50]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SHOPIFY_WEBHOOK_HANDLER }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "payload",
+              "value": "={{ JSON.stringify($json.payload) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "shopify-handler",
+      "name": "Shopify Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GITHUB_WEBHOOK_HANDLER }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "payload",
+              "value": "={{ JSON.stringify($json.payload) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "github-handler",
+      "name": "GitHub Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 350]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_HANDLER }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "payload",
+              "value": "={{ JSON.stringify($json.payload) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "slack-handler",
+      "name": "Slack Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "channel": "#webhook-logs",
+        "text": "=Unknown webhook received:\nRoute: {{ $json.route }}\nTimestamp: {{ $json.timestamp }}\nPayload: {{ JSON.stringify($json.payload).substring(0, 500) }}",
+        "otherOptions": {}
+      },
+      "id": "log-unknown",
+      "name": "Log Unknown",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [900, 650],
+      "credentials": {
+        "slackApi": {
+          "id": "1",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"route\": \"{{ $('Parse Webhook').item.json.route }}\" }"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1150, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Parse Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Webhook": {
+      "main": [
+        [{ "node": "Route by Source", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Source": {
+      "main": [
+        [{ "node": "Stripe Handler", "type": "main", "index": 0 }],
+        [{ "node": "Shopify Handler", "type": "main", "index": 0 }],
+        [{ "node": "GitHub Handler", "type": "main", "index": 0 }],
+        [{ "node": "Slack Handler", "type": "main", "index": 0 }],
+        [{ "node": "Log Unknown", "type": "main", "index": 0 }]
+      ]
+    },
+    "Stripe Handler": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Shopify Handler": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "GitHub Handler": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Slack Handler": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Unknown": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["webhook", "router", "integration"]
+}

@@ -1,0 +1,32 @@
+# Shopify App Configuration
+# Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "My Shopify App"
+client_id = "YOUR_CLIENT_ID"
+application_url = "https://your-app.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_orders,write_orders,read_customers"
+
+[auth]
+redirect_urls = [
+  "https://your-app.com/auth/callback",
+  "https://your-app.com/auth/shopify/callback",
+  "https://your-app.com/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "your-dev-store.myshopify.com"
+
+[app_proxy]
+url = "https://your-app.com/proxy"
+subpath = "app"
+prefix = "apps"

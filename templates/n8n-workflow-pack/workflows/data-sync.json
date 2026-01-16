@@ -1,0 +1,287 @@
+{
+  "name": "Multi-System Data Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "filters": {
+          "lastmodifieddate": "={{ $now.minus(1, 'hour').toISO() }}"
+        },
+        "additionalFields": {}
+      },
+      "id": "fetch-hubspot",
+      "name": "Fetch HubSpot Contacts",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [450, 200],
+      "credentials": {
+        "hubspotApi": {
+          "id": "1",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_BASE_ID",
+          "mode": "list"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "list"
+        },
+        "options": {
+          "filterByFormula": "DATETIME_DIFF(NOW(), {Last Modified}, 'hours') <= 1"
+        }
+      },
+      "id": "fetch-airtable",
+      "name": "Fetch Airtable Contacts",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 1,
+      "position": [450, 400],
+      "credentials": {
+        "airtableApi": {
+          "id": "2",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge and deduplicate contacts from both sources\nconst hubspotContacts = $('Fetch HubSpot Contacts').all();\nconst airtableContacts = $('Fetch Airtable Contacts').all();\n\n// Normalize HubSpot data\nconst normalizedHubspot = hubspotContacts.map(c => ({\n  source: 'hubspot',\n  source_id: c.json.id,\n  email: c.json.properties?.email?.toLowerCase() || '',\n  first_name: c.json.properties?.firstname || '',\n  last_name: c.json.properties?.lastname || '',\n  company: c.json.properties?.company || '',\n  phone: c.json.properties?.phone || '',\n  updated_at: c.json.properties?.lastmodifieddate || new Date().toISOString()\n}));\n\n// Normalize Airtable data\nconst normalizedAirtable = airtableContacts.map(c => ({\n  source: 'airtable',\n  source_id: c.json.id,\n  email: (c.json.fields?.Email || '').toLowerCase(),\n  first_name: c.json.fields?.['First Name'] || '',\n  last_name: c.json.fields?.['Last Name'] || '',\n  company: c.json.fields?.Company || '',\n  phone: c.json.fields?.Phone || '',\n  updated_at: c.json.fields?.['Last Modified'] || new Date().toISOString()\n}));\n\n// Merge by email, preferring most recent update\nconst contactMap = new Map();\n\n[...normalizedHubspot, ...normalizedAirtable].forEach(contact => {\n  if (!contact.email) return;\n  \n  const existing = contactMap.get(contact.email);\n  if (!existing || new Date(contact.updated_at) > new Date(existing.updated_at)) {\n    contactMap.set(contact.email, contact);\n  }\n});\n\n// Return merged contacts for syncing\nreturn Array.from(contactMap.values()).map(c => ({\n  ...c,\n  needs_hubspot_update: c.source === 'airtable',\n  needs_airtable_update: c.source === 'hubspot'\n}));"
+      },
+      "id": "merge-contacts",
+      "name": "Merge & Dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needs_hubspot_update }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-hubspot-update",
+      "name": "Needs HubSpot Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [950, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needs_airtable_update }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-airtable-update",
+      "name": "Needs Airtable Update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [950, 400]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $json.email }}",
+        "additionalFields": {
+          "firstName": "={{ $json.first_name }}",
+          "lastName": "={{ $json.last_name }}",
+          "company": "={{ $json.company }}",
+          "phone": "={{ $json.phone }}"
+        }
+      },
+      "id": "update-hubspot",
+      "name": "Update HubSpot",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [1200, 150],
+      "credentials": {
+        "hubspotApi": {
+          "id": "1",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_BASE_ID",
+          "mode": "list"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "list"
+        },
+        "id": "={{ $json.source_id }}",
+        "fields": {
+          "First Name": "={{ $json.first_name }}",
+          "Last Name": "={{ $json.last_name }}",
+          "Company": "={{ $json.company }}",
+          "Phone": "={{ $json.phone }}",
+          "Synced At": "={{ $now.toISO() }}"
+        }
+      },
+      "id": "update-airtable",
+      "name": "Update Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 1,
+      "position": [1200, 350],
+      "credentials": {
+        "airtableApi": {
+          "id": "2",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate sync results\nconst hubspotUpdates = $('Update HubSpot').all();\nconst airtableUpdates = $('Update Airtable').all();\n\nconst summary = {\n  timestamp: new Date().toISOString(),\n  hubspot_updates: hubspotUpdates.length,\n  airtable_updates: airtableUpdates.length,\n  total_synced: hubspotUpdates.length + airtableUpdates.length,\n  status: 'completed'\n};\n\nreturn summary;"
+      },
+      "id": "summarize",
+      "name": "Summarize Sync",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.total_synced }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-updates",
+      "name": "Has Updates?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#data-sync",
+        "text": "=✅ *Data Sync Complete*\n\n• HubSpot updates: {{ $json.hubspot_updates }}\n• Airtable updates: {{ $json.airtable_updates }}\n• Total synced: {{ $json.total_synced }}\n• Timestamp: {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "id": "notify-sync",
+      "name": "Notify Sync Complete",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1900, 250],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [
+        [
+          { "node": "Fetch HubSpot Contacts", "type": "main", "index": 0 },
+          { "node": "Fetch Airtable Contacts", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch HubSpot Contacts": {
+      "main": [
+        [{ "node": "Merge & Dedupe", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Airtable Contacts": {
+      "main": [
+        [{ "node": "Merge & Dedupe", "type": "main", "index": 0 }]
+      ]
+    },
+    "Merge & Dedupe": {
+      "main": [
+        [
+          { "node": "Needs HubSpot Update?", "type": "main", "index": 0 },
+          { "node": "Needs Airtable Update?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Needs HubSpot Update?": {
+      "main": [
+        [{ "node": "Update HubSpot", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Needs Airtable Update?": {
+      "main": [
+        [{ "node": "Update Airtable", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Update HubSpot": {
+      "main": [
+        [{ "node": "Summarize Sync", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Airtable": {
+      "main": [
+        [{ "node": "Summarize Sync", "type": "main", "index": 0 }]
+      ]
+    },
+    "Summarize Sync": {
+      "main": [
+        [{ "node": "Has Updates?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Updates?": {
+      "main": [
+        [{ "node": "Notify Sync Complete", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["sync", "hubspot", "airtable", "crm", "automation"]
+}

@@ -1,0 +1,272 @@
+{
+  "name": "AI Email Responder",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread",
+          "receivedAfter": "={{ $now.minus(1, 'hour').toISO() }}"
+        }
+      },
+      "id": "email-trigger",
+      "name": "Email Trigger",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "credentials": {
+        "imap": {
+          "id": "1",
+          "name": "IMAP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.from.text }}",
+              "operation": "notContains",
+              "value2": "noreply"
+            },
+            {
+              "value1": "={{ $json.from.text }}",
+              "operation": "notContains",
+              "value2": "no-reply"
+            }
+          ]
+        }
+      },
+      "id": "filter-auto",
+      "name": "Filter Auto-Emails",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an email classifier. Classify the following email into one of these categories:\n- INQUIRY: Questions about products/services\n- SUPPORT: Technical support requests\n- FEEDBACK: Customer feedback or reviews\n- SPAM: Unsolicited marketing or spam\n- OTHER: Anything else\n\nRespond with ONLY the category name.\n\nEmail subject: {{ $json.subject }}\nEmail body: {{ $json.text }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "classify-email",
+      "name": "Classify Email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "value": "INQUIRY",
+              "output": 0
+            },
+            {
+              "value": "SUPPORT",
+              "output": 1
+            },
+            {
+              "value": "FEEDBACK",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "route-email",
+      "name": "Route by Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a helpful customer service representative. Write a professional, friendly response to this inquiry email.\n\nOriginal email:\nFrom: {{ $('Email Trigger').item.json.from.text }}\nSubject: {{ $('Email Trigger').item.json.subject }}\nBody: {{ $('Email Trigger').item.json.text }}\n\nGuidelines:\n- Be helpful and professional\n- If you don't have specific information, offer to connect them with the right person\n- Keep the response concise\n- Sign off as 'Customer Support Team'"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "generate-inquiry-response",
+      "name": "Generate Inquiry Response",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1100, 100],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a technical support specialist. Write a helpful response to this support request.\n\nOriginal email:\nFrom: {{ $('Email Trigger').item.json.from.text }}\nSubject: {{ $('Email Trigger').item.json.subject }}\nBody: {{ $('Email Trigger').item.json.text }}\n\nGuidelines:\n- Acknowledge the issue\n- Provide step-by-step troubleshooting if applicable\n- Offer to escalate if needed\n- Sign off as 'Technical Support Team'"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "generate-support-response",
+      "name": "Generate Support Response",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a customer success manager. Write a warm response to this customer feedback.\n\nOriginal email:\nFrom: {{ $('Email Trigger').item.json.from.text }}\nSubject: {{ $('Email Trigger').item.json.subject }}\nBody: {{ $('Email Trigger').item.json.text }}\n\nGuidelines:\n- Thank them for the feedback\n- If positive, express gratitude\n- If negative, apologize and offer to make it right\n- Sign off as 'Customer Success Team'"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "generate-feedback-response",
+      "name": "Generate Feedback Response",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1100, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "support@yourcompany.com",
+        "toEmail": "={{ $('Email Trigger').item.json.from.text }}",
+        "subject": "=Re: {{ $('Email Trigger').item.json.subject }}",
+        "html": "={{ $json.message.content.replace(/\\n/g, '<br>') }}"
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1350, 300],
+      "credentials": {
+        "smtp": {
+          "id": "3",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#email-responses",
+        "text": "=Auto-responded to email from {{ $('Email Trigger').item.json.from.text }}\nSubject: {{ $('Email Trigger').item.json.subject }}\nType: {{ $('Classify Email').item.json.message.content }}",
+        "otherOptions": {}
+      },
+      "id": "log-slack",
+      "name": "Log to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1550, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "4",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Email Trigger": {
+      "main": [
+        [{ "node": "Filter Auto-Emails", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter Auto-Emails": {
+      "main": [
+        [{ "node": "Classify Email", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Classify Email": {
+      "main": [
+        [{ "node": "Route by Type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by Type": {
+      "main": [
+        [{ "node": "Generate Inquiry Response", "type": "main", "index": 0 }],
+        [{ "node": "Generate Support Response", "type": "main", "index": 0 }],
+        [{ "node": "Generate Feedback Response", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Generate Inquiry Response": {
+      "main": [
+        [{ "node": "Send Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Support Response": {
+      "main": [
+        [{ "node": "Send Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Feedback Response": {
+      "main": [
+        [{ "node": "Send Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        [{ "node": "Log to Slack", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["ai", "email", "automation", "openai"]
+}

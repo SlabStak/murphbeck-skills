@@ -1,0 +1,219 @@
+{
+  "name": "Lead Capture to CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.email }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "validate",
+      "name": "Validate Data",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "search",
+        "filterType": "manual",
+        "filters": {
+          "properties": [
+            {
+              "key": "email",
+              "value": "={{ $json.email }}"
+            }
+          ]
+        }
+      },
+      "id": "check-duplicate",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "hubspotApi": {
+          "id": "1",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.total }}",
+              "operation": "equal",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "is-new",
+      "name": "Is New Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "create",
+        "additionalFields": {
+          "email": "={{ $('Webhook').item.json.email }}",
+          "firstName": "={{ $('Webhook').item.json.first_name }}",
+          "lastName": "={{ $('Webhook').item.json.last_name }}",
+          "company": "={{ $('Webhook').item.json.company }}",
+          "phone": "={{ $('Webhook').item.json.phone }}"
+        }
+      },
+      "id": "create-contact",
+      "name": "Create Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [1050, 200],
+      "credentials": {
+        "hubspotApi": {
+          "id": "1",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "toEmail": "={{ $('Webhook').item.json.email }}",
+        "subject": "Thanks for your interest!",
+        "html": "<h1>Welcome!</h1><p>Thank you for reaching out. Our team will contact you shortly.</p>"
+      },
+      "id": "send-welcome",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1250, 200],
+      "credentials": {
+        "smtp": {
+          "id": "2",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#sales-leads",
+        "text": "=New lead: {{ $('Webhook').item.json.first_name }} {{ $('Webhook').item.json.last_name }} from {{ $('Webhook').item.json.company }}\nEmail: {{ $('Webhook').item.json.email }}",
+        "otherOptions": {}
+      },
+      "id": "notify-slack",
+      "name": "Notify Sales Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1450, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "3",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Lead captured successfully\" }"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Contact already exists\" }"
+      },
+      "id": "duplicate-response",
+      "name": "Duplicate Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Invalid data - email required\" }",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [650, 500]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Validate Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Data": {
+      "main": [
+        [{ "node": "Check Duplicate", "type": "main", "index": 0 }],
+        [{ "node": "Error Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [{ "node": "Is New Lead?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is New Lead?": {
+      "main": [
+        [{ "node": "Create Contact", "type": "main", "index": 0 }],
+        [{ "node": "Duplicate Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Contact": {
+      "main": [
+        [{ "node": "Send Welcome Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [{ "node": "Notify Sales Team", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Sales Team": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["lead-generation", "crm", "hubspot"]
+}

@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Shopify Session Storage (required for OAuth)
+model Session {
+  id              String    @id
+  shop            String
+  state           String
+  isOnline        Boolean   @default(false)
+  scope           String?
+  expires         DateTime?
+  accessToken     String
+  userId          BigInt?
+  firstName       String?
+  lastName        String?
+  email           String?
+  accountOwner    Boolean   @default(false)
+  locale          String?
+  collaborator    Boolean?  @default(false)
+  emailVerified   Boolean?  @default(false)
+
+  @@index([shop])
+}
+
+// Shop data (persists after session expires)
+model Shop {
+  id                String    @id @default(cuid())
+  shopDomain        String    @unique
+  accessToken       String?
+  installedAt       DateTime  @default(now())
+  uninstalledAt     DateTime?
+  plan              String    @default("free")
+  trialEndsAt       DateTime?
+  billingStatus     String    @default("pending")
+  chargeId          String?
+
+  // Shop metadata
+  name              String?
+  email             String?
+  currency          String?
+  timezone          String?
+
+  // App settings
+  settings          Json      @default("{}")
+
+  // Relations
+  syncLogs          SyncLog[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([shopDomain])
+  @@index([billingStatus])
+}
+
+// Sync/Job logging
+model SyncLog {
+  id          String    @id @default(cuid())
+  shopId      String
+  type        String    // products, orders, customers, etc.
+  status      String    // pending, running, completed, failed
+  itemsTotal  Int       @default(0)
+  itemsSynced Int       @default(0)
+  error       String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([type])
+  @@index([status])
+}
+
+// Webhook event log (for debugging/auditing)
+model WebhookLog {
+  id          String    @id @default(cuid())
+  shopDomain  String
+  topic       String
+  payload     Json
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([shopDomain])
+  @@index([topic])
+  @@index([createdAt])
+}
