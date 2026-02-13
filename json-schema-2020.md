@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/json-schema-2020.md

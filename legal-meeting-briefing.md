@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/legal-meeting-briefing.md

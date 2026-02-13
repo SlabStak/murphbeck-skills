@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/product-management-synthesize-research.md

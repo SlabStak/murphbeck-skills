@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/marketing-campaign-plan.md

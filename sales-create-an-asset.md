@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/sales-create-an-asset.md

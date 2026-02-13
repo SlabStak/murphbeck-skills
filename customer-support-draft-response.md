@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/customer-support-draft-response.md

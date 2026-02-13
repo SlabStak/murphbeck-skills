@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/legal-vendor-check.md

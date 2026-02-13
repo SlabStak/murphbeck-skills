@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/cowork-plugin-management-cowork-plugin-customizer.md

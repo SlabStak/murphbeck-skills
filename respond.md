@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/respond.md

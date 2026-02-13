@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/claude-healthcare-ai.md

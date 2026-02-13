@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/claude-opus-4-capabilities.md

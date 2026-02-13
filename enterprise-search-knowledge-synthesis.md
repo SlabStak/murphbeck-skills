@@ -1,0 +1,1 @@
+/Volumes/LaCie/ai/skills/enterprise-search-knowledge-synthesis.md
